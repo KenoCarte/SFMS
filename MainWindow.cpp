@@ -40,7 +40,7 @@ namespace {
     constexpr int kColumnModified = 3;
     constexpr int kColumnPath = 4;
 
-    // 返回用于保存目录列表的二进制文件路径。
+    // 返回用于保存目录列表的二进制文件路径
     QString persistedDirectoryFilePath() {
         const QString appDataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
         QDir dir(appDataDir);
@@ -48,7 +48,7 @@ namespace {
         return dir.filePath("directories.bin");
     }
 
-    // 返回用于保存窗口状态的二进制文件路径。
+    // 返回用于保存窗口状态的二进制文件路径
     QString persistedWindowStateFilePath() {
         const QString appDataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
         QDir dir(appDataDir);
@@ -56,70 +56,75 @@ namespace {
         return dir.filePath("window_state.bin");
     }
 
-    // 为导入文件生成一个不会与现有文件重名的目标路径。
+    // 为导入文件生成一个不会与现有文件重名的目标路径
     QString buildUniqueTargetPath(const QString& targetDir, const QFileInfo& sourceInfo) {
         QString candidate = QDir(targetDir).filePath(sourceInfo.fileName());
-        if (!QFile::exists(candidate)) {
-            return candidate;
-        }
-
+        if (!QFile::exists(candidate)) return candidate;
         const QString stem = sourceInfo.completeBaseName();
         const QString suffix = sourceInfo.suffix();
         for (int i = 1; i <= 9999; ++i) {
             const QString suffixText = suffix.isEmpty() ? "" : "." + suffix;
+            // 生成类似 "report_1.docx"、"report_2.docx" 的候选文件名
             const QString name = QString("%1_%2%3").arg(stem).arg(i).arg(suffixText);
             candidate = QDir(targetDir).filePath(name);
-            if (!QFile::exists(candidate)) {
-                return candidate;
-            }
+            if (!QFile::exists(candidate)) return candidate;
         }
-
+        // 添加一个随机 UUID
         return QDir(targetDir).filePath(QUuid::createUuid().toString(QUuid::WithoutBraces) + "_" + sourceInfo.fileName());
     }
 }
 
-// 自定义代理模型：在文件名关键字基础上，再叠加扩展名过滤条件。
+// 自定义代理模型，在文件名关键字基础上叠加扩展名过滤条件
 class FileFilterProxyModel : public QSortFilterProxyModel {
 public:
-    // 构造一个附着到指定父对象的过滤代理模型。
+    // 构造一个附着到指定父对象的过滤代理模型
     explicit FileFilterProxyModel(QObject* parent = nullptr)
         : QSortFilterProxyModel(parent) {
     }
-
-    // 设置扩展名过滤条件，并通知视图重新筛选。
+    // 设置扩展名过滤条件，并通知视图重新筛选
     void setExtensionFilter(const QString& ext) {
         extensionFilter_ = ext;
-        // 重新计算
-    #if QT_VERSION >= QT_VERSION_CHECK(6, 10, 0)
+#if QT_VERSION >= QT_VERSION_CHECK(6, 10, 0)
         beginFilterChange();
         endFilterChange(QSortFilterProxyModel::Direction::Rows);
-    #else
+#else
         invalidateFilter();
-    #endif
+#endif
     }
-
 protected:
+    // 判断 sourceModel_ 中某一行是否应显示在结果表中
+    // 过滤规则由两部分同时决定：
+    // 1) 文件名关键字匹配（来自 setFilterRegularExpression）
+    // 2) 扩展名匹配（来自 setExtensionFilter）
+    // 只有两者都通过时，这一行才会被保留
     bool filterAcceptsRow(int sourceRow, const QModelIndex& sourceParent) const override {
+        // 先拿到“文件名列”和“扩展名列”的索引位置
+        // sourceRow 是源模型中的行号；sourceParent 对于平面表格通常为空索引
         const QModelIndex nameIndex = sourceModel()->index(sourceRow, kColumnName, sourceParent);
         const QModelIndex extIndex = sourceModel()->index(sourceRow, kColumnExt, sourceParent);
-
+        // 读取该行当前的文件名与扩展名文本，供后续匹配使用
         const QString fileName = sourceModel()->data(nameIndex).toString();
         const QString fileExt = sourceModel()->data(extIndex).toString();
-
+        // 关键字过滤：
+        // - 当正则模式为空时，表示“不过滤”，直接放行
+        // - 否则要求 fileName 能匹配当前正则
+        // 这里使用 contains(QRegularExpression) 进行匹配
         const bool keywordPass = filterRegularExpression().pattern().isEmpty()
             || fileName.contains(filterRegularExpression());
-
+        // 扩展名过滤：
+        // - extensionFilter_ 为 "*" 时表示“全部扩展名都允许”
+        // - 否则要求文件扩展名与下拉框选择值相等（忽略大小写）
         const bool extPass = extensionFilter_ == "*"
             || fileExt.compare(extensionFilter_, Qt::CaseInsensitive) == 0;
-
+        // 两个条件取与：只有同时满足关键字和扩展名条件，行才会显示
         return keywordPass && extPass;
     }
-
 private:
+    // 默认不过滤任何扩展名，显示所有文件
     QString extensionFilter_ = "*";
 };
 
-// 构造主窗口，并恢复保存的目录列表和窗口状态。
+// 构造主窗口，并恢复保存的目录列表和窗口状态
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent) {
     buildUi();
@@ -129,13 +134,14 @@ MainWindow::MainWindow(QWidget* parent)
     setupToolbar();
 }
 
-// 创建主界面布局、控件、模型和样式。
+// 创建主界面布局、控件、模型和样式
 void MainWindow::buildUi() {
     setWindowTitle(QStringLiteral("SFMS简单文件管理系统"));
     resize(1100, 700);
     QWidget* central = new QWidget(this);
     setCentralWidget(central);
     central->setObjectName("centralPanel");
+    // 设置边距和控件间距
     auto* mainLayout = new QHBoxLayout(central);
     mainLayout->setContentsMargins(20, 20, 20, 16);
     mainLayout->setSpacing(16);
@@ -149,11 +155,10 @@ void MainWindow::buildUi() {
     auto* leftTitle = new QLabel(QStringLiteral("索引目录"), this);
     directoryList_ = new QListWidget(this);
     directoryList_->setSpacing(6);
-
     leftPanel->addWidget(leftTitle);
     leftPanel->addWidget(directoryList_, 1);
 
-    // 结果统计、过滤行、表格。
+    // 结果统计、过滤行、表格
     auto* rightCard = new QFrame(this);
     rightCard->setObjectName("panelCard");
     auto* rightPanel = new QVBoxLayout(rightCard);
@@ -174,11 +179,9 @@ void MainWindow::buildUi() {
     auto* searchLabel = new QLabel(QStringLiteral("文件名搜索:"), this);
     searchEdit_ = new QLineEdit(this);
     searchEdit_->setPlaceholderText(QStringLiteral("输入关键字，例如 report 或 作业"));
-
     auto* extLabel = new QLabel(QStringLiteral("扩展名:"), this);
     extensionCombo_ = new QComboBox(this);
     extensionCombo_->addItem("*");
-
     filterRow->addWidget(searchLabel);
     filterRow->addWidget(searchEdit_, 1);
     filterRow->addWidget(extLabel);
@@ -193,11 +196,11 @@ void MainWindow::buildUi() {
         QStringLiteral("所在目录")
         });
 
+    // 创建过滤代理模型
     auto* typedProxy = new FileFilterProxyModel(this);
     typedProxy->setSourceModel(sourceModel_);
     typedProxy->setFilterCaseSensitivity(Qt::CaseInsensitive);
     typedProxy->setFilterKeyColumn(kColumnName);
-
     proxyModel_ = typedProxy;
 
     tableView_ = new QTableView(this);
@@ -219,9 +222,9 @@ void MainWindow::buildUi() {
     rightPanel->addLayout(filterRow);
     rightPanel->addWidget(tableView_);
 
-    leftCard->setMinimumWidth(330);
-    mainLayout->addWidget(leftCard, 4);
-    mainLayout->addWidget(rightCard, 6);
+    leftCard->setMinimumWidth(260);
+    mainLayout->addWidget(leftCard, 3);
+    mainLayout->addWidget(rightCard, 7);
 
     setStyleSheet(
         "QWidget#centralPanel {"
@@ -327,15 +330,13 @@ void MainWindow::buildUi() {
     statusBar()->showMessage(QStringLiteral("请先添加目录并重建索引"));
 }
 
-// 连接所有信号与槽，组织目录、搜索和结果表的交互。
+// 连接所有信号与槽，组织目录、搜索和结果表的交互
 void MainWindow::connectSignals() {
     connect(searchEdit_, &QLineEdit::textChanged, this, &MainWindow::onSearchTextChanged);
     connect(extensionCombo_, &QComboBox::currentTextChanged, this, &MainWindow::onExtensionFilterChanged);
     connect(tableView_, &QTableView::doubleClicked, this, &MainWindow::onOpenFromTable);
     connect(directoryList_, &QListWidget::itemDoubleClicked, this, [this](auto* item) {
-        if (!item) {
-            return;
-        }
+        if (!item) return;
         const QString selectedDir = item->data(Qt::UserRole).toString().isEmpty()
             ? item->text()
             : item->data(Qt::UserRole).toString();
@@ -345,7 +346,6 @@ void MainWindow::connectSignals() {
     connect(directoryList_, &QListWidget::currentRowChanged, this, [this](int) {
         persistWindowState();
         });
-
     connect(sourceModel_, &QStandardItemModel::modelReset, this, &MainWindow::updateResultStats);
     connect(sourceModel_, &QStandardItemModel::rowsInserted, this, &MainWindow::updateResultStats);
     connect(sourceModel_, &QStandardItemModel::rowsRemoved, this, &MainWindow::updateResultStats);
@@ -354,7 +354,7 @@ void MainWindow::connectSignals() {
     connect(proxyModel_, &QSortFilterProxyModel::rowsRemoved, this, &MainWindow::updateResultStats);
 }
 
-// 创建顶部工具栏，并绑定快捷操作。
+// 创建顶部工具栏，并绑定快捷操作
 void MainWindow::setupToolbar() {
     auto* toolbar = addToolBar(QStringLiteral("快速操作"));
     toolbar->setMovable(false);
@@ -390,24 +390,17 @@ void MainWindow::setupToolbar() {
         });
 }
 
-// 刷新右侧结果统计文本。
+// 刷新右侧结果统计文本
 void MainWindow::updateResultStats() {
-    if (!resultStatsLabel_) {
-        return;
-    }
-
     const int total = sourceModel_ ? sourceModel_->rowCount() : 0;
     const int visible = proxyModel_ ? proxyModel_->rowCount() : 0;
     resultStatsLabel_->setText(QStringLiteral("当前显示 %1 / 总计 %2").arg(visible).arg(total));
 }
 
-// 将窗口几何和当前选中的目录保存到本地。
+// 将窗口几何和当前选中的目录保存到本地
 void MainWindow::persistWindowState() const {
     QFile outFile(persistedWindowStateFilePath());
-    if (!outFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        return;
-    }
-
+    if (!outFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) return;
     const QString selectedDir = directoryPathAt(directoryList_ ? directoryList_->currentRow() : -1);
     QDataStream out(&outFile);
     out.setVersion(QDataStream::Qt_6_5);
@@ -417,33 +410,28 @@ void MainWindow::persistWindowState() const {
         << selectedDir;
 }
 
-// 从本地恢复窗口几何和上次选中的目录。
+// 从本地恢复窗口几何和上次选中的目录
 void MainWindow::loadWindowState() {
     QFile inFile(persistedWindowStateFilePath());
-    if (!inFile.exists() || !inFile.open(QIODevice::ReadOnly)) {
-        return;
-    }
-
+    if (!inFile.exists() || !inFile.open(QIODevice::ReadOnly)) return;
     QDataStream in(&inFile);
     in.setVersion(QDataStream::Qt_6_5);
-
     quint32 magic = 0;
     quint16 version = 0;
     QByteArray geometry;
     QString selectedDir;
     in >> magic >> version >> geometry >> selectedDir;
-
-    if (in.status() != QDataStream::Ok || magic != 0x53464D53 || version != 2) {
-        return;
-    }
-
-    if (!geometry.isEmpty()) {
-        restoreGeometry(geometry);
-    }
-
+    if (in.status() != QDataStream::Ok || magic != 0x53464D53 || version != 2) return;
+    if (!geometry.isEmpty()) restoreGeometry(geometry);
     if (!selectedDir.isEmpty()) {
         for (int i = 0; i < directoryList_->count(); ++i) {
             if (directoryPathAt(i).compare(selectedDir, Qt::CaseInsensitive) == 0) {
+                auto* item = directoryList_->item(i);
+                const QString selectedDir = item->data(Qt::UserRole).toString().isEmpty()
+                    ? item->text()
+                    : item->data(Qt::UserRole).toString();
+                statusBar()->showMessage(QStringLiteral("正在重建目录: %1").arg(selectedDir), 1500);
+                rebuildIndexForDirectories(QStringList{ selectedDir });
                 directoryList_->setCurrentRow(i);
                 break;
             }
@@ -451,60 +439,44 @@ void MainWindow::loadWindowState() {
     }
 }
 
-// 在关闭窗口前保存目录列表和窗口状态。
+// 在关闭窗口前保存目录列表和窗口状态
 void MainWindow::closeEvent(QCloseEvent* event) {
     persistDirectories();
     persistWindowState();
     QMainWindow::closeEvent(event);
 }
 
-// 读取左侧列表中某一项对应的真实目录路径。
+// 读取左侧列表中某一项对应的真实目录路径
 QString MainWindow::directoryPathAt(int index) const {
-    if (index < 0 || index >= directoryList_->count()) {
-        return QString();
-    }
-
+    if (index < 0 || index >= directoryList_->count()) return QString();
     const QListWidgetItem* item = directoryList_->item(index);
     const QString stored = item->data(Qt::UserRole).toString();
     return stored.isEmpty() ? item->text() : stored;
 }
 
-// 从磁盘恢复上次保存的目录列表。
+// 从磁盘恢复上次保存的目录列表
 void MainWindow::loadPersistedDirectories() {
     QFile inFile(persistedDirectoryFilePath());
-    if (!inFile.exists()) {
-        return;
-    }
-
-    if (!inFile.open(QIODevice::ReadOnly)) {
+    if (!inFile.exists() || !inFile.open(QIODevice::ReadOnly)) {
         statusBar()->showMessage(QStringLiteral("目录缓存读取失败"), 2000);
         return;
     }
-
     QDataStream in(&inFile);
     in.setVersion(QDataStream::Qt_6_5);
-
-    quint32 magic = 0;
-    quint16 version = 0;
+    quint32 magic;
+    quint16 version;
     QStringList directories;
     in >> magic >> version >> directories;
-
     if (in.status() != QDataStream::Ok || magic != 0x53464D53 || version != 1) {
-        statusBar()->showMessage(QStringLiteral("目录缓存格式不匹配，已忽略"), 2500);
+        statusBar()->showMessage(QStringLiteral("目录缓存格式不匹配"), 2500);
         return;
     }
-
-    for (const QString& dirPathRaw : directories) {
-        const QString dirPath = QDir::toNativeSeparators(QDir(dirPathRaw).absolutePath());
+    for (const auto& dirPathRaw : directories) {
+        const auto dirPath = QDir::toNativeSeparators(QDir(dirPathRaw).absolutePath());
         if (!QFileInfo::exists(dirPath) || !QFileInfo(dirPath).isDir()) {
             continue;
         }
-
-        QString displayName = QFileInfo(dirPath).fileName();
-        if (displayName.isEmpty()) {
-            displayName = dirPath;
-        }
-
+        QString displayName = QFileInfo(dirPath).fileName().isEmpty() ? dirPath : QFileInfo(dirPath).fileName();
         auto* item = new QListWidgetItem(displayName);
         item->setData(Qt::UserRole, dirPath);
         item->setToolTip(dirPath);
@@ -512,7 +484,7 @@ void MainWindow::loadPersistedDirectories() {
     }
 }
 
-// 将当前目录列表以二进制格式保存到本地。
+// 将当前目录列表以二进制格式保存到本地
 void MainWindow::persistDirectories() const {
     QStringList directories;
     directories.reserve(directoryList_->count());
@@ -522,24 +494,22 @@ void MainWindow::persistDirectories() const {
             directories.push_back(dir);
         }
     }
-
     QFile outFile(persistedDirectoryFilePath());
     if (!outFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        statusBar()->showMessage(QStringLiteral("目录缓存写入失败"), 2000);
         return;
     }
-
     QDataStream out(&outFile);
     out.setVersion(QDataStream::Qt_6_5);
     out << static_cast<quint32>(0x53464D53) << static_cast<quint16>(1) << directories;
 }
 
-// 扫描指定目录集合并重建索引结果表。
+// 扫描指定目录集合并重建索引结果表
 void MainWindow::rebuildIndexForDirectories(const QStringList& directories) {
     if (directories.isEmpty()) {
         QMessageBox::information(this, QStringLiteral("提示"), QStringLiteral("请先添加至少一个目录。"));
         return;
     }
-
     sourceModel_->clear();
     sourceModel_->setHorizontalHeaderLabels({
         QStringLiteral("文件名"),
@@ -551,10 +521,8 @@ void MainWindow::rebuildIndexForDirectories(const QStringList& directories) {
 
     QStringList allExtensions;
     int fileCount = 0;
-
     QApplication::setOverrideCursor(Qt::WaitCursor);
-
-    for (const QString& rootDir : directories) {
+    for (const auto& rootDir : directories) {
         QDirIterator it(rootDir,
             QDir::Files | QDir::NoDotAndDotDot,
             QDirIterator::Subdirectories);
@@ -562,25 +530,20 @@ void MainWindow::rebuildIndexForDirectories(const QStringList& directories) {
         while (it.hasNext()) {
             it.next();
             const QFileInfo info = it.fileInfo();
-
             FileRecord file;
             file.name = info.fileName();
             file.extension = info.suffix().isEmpty() ? "(none)" : "." + info.suffix().toLower();
             file.path = info.absoluteFilePath();
             file.size = info.size();
             file.lastModified = info.lastModified();
-
             appendFileToModel(file);
             allExtensions.push_back(file.extension);
             ++fileCount;
         }
     }
-
     QApplication::restoreOverrideCursor();
-
     allExtensions.removeDuplicates();
     allExtensions.sort(Qt::CaseInsensitive);
-
     extensionCombo_->blockSignals(true);
     extensionCombo_->clear();
     extensionCombo_->addItem("*");
@@ -589,12 +552,11 @@ void MainWindow::rebuildIndexForDirectories(const QStringList& directories) {
     }
     extensionCombo_->setCurrentIndex(0);
     extensionCombo_->blockSignals(false);
-
     updateResultStats();
     statusBar()->showMessage(QStringLiteral("索引完成，共 %1 个文件").arg(fileCount));
 }
 
-// 让用户选择一个新目录并追加到左侧目录列表中。
+// 让用户选择一个新目录并追加到左侧目录列表中
 void MainWindow::onAddDirectory() {
     const QString dir = QFileDialog::getExistingDirectory(this, QStringLiteral("选择要索引的目录"));
     if (dir.isEmpty()) return;
@@ -610,12 +572,10 @@ void MainWindow::onAddDirectory() {
             return;
         }
     }
-
     QString displayName = QFileInfo(normalizedDir).fileName();
     if (displayName.isEmpty()) {
         displayName = normalizedDir;
     }
-
     auto* item = new QListWidgetItem(displayName);
     item->setData(Qt::UserRole, normalizedDir);
     item->setToolTip(normalizedDir);
@@ -624,7 +584,7 @@ void MainWindow::onAddDirectory() {
     statusBar()->showMessage(QStringLiteral("已添加目录"), 2000);
 }
 
-// 删除左侧当前选中的目录。
+// 删除左侧当前选中的目录
 void MainWindow::onRemoveSelectedDirectory() {
     const int row = directoryList_->currentRow();
     if (row < 0) return;
@@ -633,7 +593,7 @@ void MainWindow::onRemoveSelectedDirectory() {
     statusBar()->showMessage(QStringLiteral("已移除目录"), 2000);
 }
 
-// 根据左侧所有目录重新建立完整索引。
+// 根据左侧所有目录重新建立完整索引
 void MainWindow::onBuildIndex() {
     QStringList dirs;
     dirs.reserve(directoryList_->count());
@@ -644,7 +604,7 @@ void MainWindow::onBuildIndex() {
     rebuildIndexForDirectories(dirs);
 }
 
-// 让用户选择文件，并复制到左侧当前选中的目录。
+// 让用户选择文件，并复制到左侧当前选中的目录
 void MainWindow::onImportFilesToSelectedDirectory() {
     const int selectedIndex = directoryList_->currentRow();
     const QString targetDir = directoryPathAt(selectedIndex);
@@ -652,7 +612,6 @@ void MainWindow::onImportFilesToSelectedDirectory() {
         QMessageBox::information(this, QStringLiteral("提示"), QStringLiteral("请先在左侧选中一个目录。"));
         return;
     }
-
     const QStringList sourceFiles = QFileDialog::getOpenFileNames(
         this,
         QStringLiteral("选择要导入的文件"),
@@ -661,7 +620,6 @@ void MainWindow::onImportFilesToSelectedDirectory() {
     if (sourceFiles.isEmpty()) {
         return;
     }
-
     int successCount = 0;
     int failCount = 0;
     for (const QString& src : sourceFiles) {
@@ -670,26 +628,19 @@ void MainWindow::onImportFilesToSelectedDirectory() {
             ++failCount;
             continue;
         }
-
         const QString targetPath = buildUniqueTargetPath(targetDir, srcInfo);
         if (QDir::toNativeSeparators(srcInfo.absoluteFilePath()).compare(QDir::toNativeSeparators(targetPath), Qt::CaseInsensitive) == 0) {
             ++failCount;
             continue;
         }
-
-        if (QFile::copy(srcInfo.absoluteFilePath(), targetPath)) {
-            ++successCount;
-        }
-        else {
-            ++failCount;
-        }
+        if (QFile::copy(srcInfo.absoluteFilePath(), targetPath)) ++successCount;
+        else ++failCount;
     }
-
     statusBar()->showMessage(QStringLiteral("导入完成：成功 %1，失败 %2").arg(successCount).arg(failCount), 3000);
     rebuildIndexForDirectories(QStringList{ targetDir });
 }
 
-// 根据关键字更新文件名过滤条件。
+// 根据关键字更新文件名过滤条件
 void MainWindow::onSearchTextChanged(const QString& text) {
     auto* typedProxy = static_cast<FileFilterProxyModel*>(proxyModel_);
     typedProxy->setFilterRegularExpression(QRegularExpression(
@@ -698,65 +649,53 @@ void MainWindow::onSearchTextChanged(const QString& text) {
     updateResultStats();
 }
 
-// 根据下拉框更新扩展名过滤条件。
+// 根据下拉框更新扩展名过滤条件
 void MainWindow::onExtensionFilterChanged(const QString& ext) {
     auto* typedProxy = static_cast<FileFilterProxyModel*>(proxyModel_);
     typedProxy->setExtensionFilter(ext);
     updateResultStats();
 }
 
-// 双击结果项后，使用系统默认程序打开文件。
+// 双击结果项后，使用系统默认程序打开文件
 void MainWindow::onOpenFromTable(const QModelIndex& proxyIndex) {
     if (!proxyIndex.isValid()) {
         return;
     }
-
     const QModelIndex sourceIndex = proxyModel_->mapToSource(proxyIndex);
     const QStandardItem* pathItem = sourceModel_->item(sourceIndex.row(), kColumnPath);
     const QString path = pathItem ? pathItem->data(Qt::UserRole + 1).toString() : QString();
-
     const bool ok = QDesktopServices::openUrl(QUrl::fromLocalFile(path));
     if (!ok) {
         QMessageBox::warning(this, QStringLiteral("打开失败"), QStringLiteral("无法打开文件:\n%1").arg(path));
     }
 }
 
-// 将一条文件记录写入表格模型。
+// 将一条文件记录写入表格模型
 void MainWindow::appendFileToModel(const FileRecord& file) {
     QList<QStandardItem*> row;
-
     const QFileInfo fileInfo(file.path);
     const QString parentDirName = fileInfo.dir().dirName().isEmpty()
         ? fileInfo.dir().absolutePath()
         : fileInfo.dir().dirName();
-
     auto* nameItem = new QStandardItem(file.name);
     auto* extItem = new QStandardItem(file.extension);
     auto* sizeItem = new QStandardItem(humanReadableSize(file.size));
     auto* timeItem = new QStandardItem(file.lastModified.toString("yyyy-MM-dd HH:mm:ss"));
     auto* pathItem = new QStandardItem(parentDirName);
-
     sizeItem->setData(file.size, Qt::UserRole + 1);
     timeItem->setData(file.lastModified, Qt::UserRole + 1);
     pathItem->setData(file.path, Qt::UserRole + 1);
-
     row << nameItem << extItem << sizeItem << timeItem << pathItem;
     sourceModel_->appendRow(row);
 }
 
-// 将字节数转换成便于阅读的大小文本。
+// 将字节数转换成便于阅读的大小文本
 QString MainWindow::humanReadableSize(qint64 bytes) {
     const qint64 kb = 1024;
     const qint64 mb = kb * 1024;
     const qint64 gb = mb * 1024;
-    if (bytes >= gb) {
-        return QString::number(bytes / static_cast<double>(gb), 'f', 2) + " GB";
-    }
-    if (bytes >= mb) {
-        return QString::number(bytes / static_cast<double>(mb), 'f', 2) + " MB";
-    }
-    if (bytes >= kb) {
-        return QString::number(bytes / static_cast<double>(kb), 'f', 2) + " KB";
-    }
+    if (bytes >= gb) return QString::number(1.0 * bytes / static_cast<double>(gb), 'f', 2) + " GB";
+    if (bytes >= mb) return QString::number(1.0 * bytes / static_cast<double>(mb), 'f', 2) + " MB";
+    if (bytes >= kb) return QString::number(1.0 * bytes / static_cast<double>(kb), 'f', 2) + " KB";
     return QString::number(bytes) + " B";
 }
